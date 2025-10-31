@@ -14,13 +14,16 @@
         </header>
         
         <div class="search-container">
-            <input 
-                type="text" 
-                id="searchInput" 
-                placeholder="Enter airport code (e.g., OAK, JFK, LAX)"
-                autocomplete="off"
-                autofocus
-            >
+            <div class="input-wrapper">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    placeholder="Enter airport code (e.g., OAK, JFK, LAX)"
+                    autocomplete="off"
+                    autofocus
+                >
+                <div id="autocomplete" class="autocomplete-dropdown"></div>
+            </div>
             <button id="searchBtn">Search</button>
         </div>
         
