@@ -1,4 +1,6 @@
 let airportData = [];
+let currentSuggestions = [];
+let selectedIndex = -1;
 
 // Load CSV data
 async function loadAirportData() {
@@ -158,10 +160,98 @@ function getCountryName(isoCode) {
     return countryMap[isoCode] || isoCode;
 }
 
+// Filter airports for autocomplete
+function filterAirports(query) {
+    if (!query || query.trim().length === 0) {
+        return [];
+    }
+    
+    const searchQuery = query.trim().toUpperCase();
+    const matches = [];
+    
+    for (const airport of airportData) {
+        const codes = [
+            airport.iata_code,
+            airport.icao_code,
+            airport.ident,
+            airport.local_code,
+            airport.gps_code
+        ].filter(code => code && code !== '');
+        
+        const code = codes.find(c => c.toUpperCase().startsWith(searchQuery));
+        
+        if (code) {
+            matches.push({
+                ...airport,
+                matchedCode: code
+            });
+        }
+        
+        // Limit to 10 suggestions for performance
+        if (matches.length >= 10) {
+            break;
+        }
+    }
+    
+    return matches;
+}
+
+// Display autocomplete suggestions
+function displaySuggestions(suggestions) {
+    const autocomplete = document.getElementById('autocomplete');
+    
+    if (suggestions.length === 0 || !document.getElementById('searchInput').value.trim()) {
+        autocomplete.classList.remove('show');
+        return;
+    }
+    
+    autocomplete.innerHTML = suggestions.map((airport, index) => {
+        const code = airport.matchedCode;
+        const municipality = airport.municipality || '';
+        const country = getCountryName(airport.iso_country || '');
+        const location = municipality ? `${municipality}, ${country}` : country;
+        
+        return `
+            <div class="autocomplete-item" data-index="${index}">
+                <span class="autocomplete-code">${code}</span>
+                <span class="autocomplete-name">${airport.name}</span>
+                ${location ? `<span class="autocomplete-location">${location}</span>` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    autocomplete.classList.add('show');
+    
+    // Add click handlers
+    autocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const index = parseInt(item.dataset.index);
+            selectSuggestion(suggestions[index]);
+        });
+    });
+    
+    selectedIndex = -1;
+}
+
+// Select a suggestion
+function selectSuggestion(airport) {
+    const searchInput = document.getElementById('searchInput');
+    const code = airport.matchedCode || airport.iata_code || airport.ident;
+    searchInput.value = code;
+    
+    const autocomplete = document.getElementById('autocomplete');
+    autocomplete.classList.remove('show');
+    
+    displayResult(airport);
+}
+
 // Handle search
 function handleSearch() {
     const searchInput = document.getElementById('searchInput');
     const code = searchInput.value.trim();
+    
+    // Hide autocomplete
+    document.getElementById('autocomplete').classList.remove('show');
     
     if (!code) {
         document.getElementById('results').innerHTML = `
@@ -177,17 +267,71 @@ function handleSearch() {
 }
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    loadAirportData();
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadAirportData();
     
     const searchBtn = document.getElementById('searchBtn');
     const searchInput = document.getElementById('searchInput');
+    const autocomplete = document.getElementById('autocomplete');
     
     searchBtn.addEventListener('click', handleSearch);
     
-    searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleSearch();
+    // Real-time autocomplete as user types
+    let debounceTimer;
+    searchInput.addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
+        
+        debounceTimer = setTimeout(() => {
+            const query = e.target.value;
+            if (query.trim().length > 0) {
+                currentSuggestions = filterAirports(query);
+                displaySuggestions(currentSuggestions);
+            } else {
+                autocomplete.classList.remove('show');
+                document.getElementById('results').innerHTML = '';
+            }
+        }, 150);
+    });
+    
+    // Keyboard navigation
+    searchInput.addEventListener('keydown', (e) => {
+        const items = autocomplete.querySelectorAll('.autocomplete-item');
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            updateHighlight(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateHighlight(items);
+        } else if (e.key === 'Enter') {
+            if (selectedIndex >= 0 && currentSuggestions[selectedIndex]) {
+                e.preventDefault();
+                selectSuggestion(currentSuggestions[selectedIndex]);
+            } else {
+                handleSearch();
+            }
+        } else if (e.key === 'Escape') {
+            autocomplete.classList.remove('show');
+            selectedIndex = -1;
+        }
+    });
+    
+    function updateHighlight(items) {
+        items.forEach((item, index) => {
+            item.classList.toggle('highlighted', index === selectedIndex);
+        });
+        if (selectedIndex >= 0 && items[selectedIndex]) {
+            items[selectedIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+    
+    // Close autocomplete when clicking outside
+    document.addEventListener('click', (e) => {
+        const inputWrapper = searchInput.closest('.input-wrapper');
+        if (inputWrapper && !inputWrapper.contains(e.target)) {
+            autocomplete.classList.remove('show');
         }
     });
     
