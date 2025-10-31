@@ -160,53 +160,184 @@ function getCountryName(isoCode) {
     return countryMap[isoCode] || isoCode;
 }
 
+// Check if state query matches (handles both state codes like "TX" and state names like "Texas")
+function matchesState(query, region, country) {
+    if (!query || !region) return false;
+    
+    const queryUpper = query.toUpperCase();
+    const regionUpper = region.toUpperCase();
+    const countryUpper = country.toUpperCase();
+    
+    // Direct match
+    if (regionUpper.includes(queryUpper) || countryUpper.includes(queryUpper)) {
+        return true;
+    }
+    
+    // US state code to name mapping
+    if (countryUpper === 'UNITED STATES' || countryUpper === 'US') {
+        const stateMap = {
+            'AL': 'ALABAMA', 'AK': 'ALASKA', 'AZ': 'ARIZONA', 'AR': 'ARKANSAS',
+            'CA': 'CALIFORNIA', 'CO': 'COLORADO', 'CT': 'CONNECTICUT', 'DE': 'DELAWARE',
+            'FL': 'FLORIDA', 'GA': 'GEORGIA', 'HI': 'HAWAII', 'ID': 'IDAHO',
+            'IL': 'ILLINOIS', 'IN': 'INDIANA', 'IA': 'IOWA', 'KS': 'KANSAS',
+            'KY': 'KENTUCKY', 'LA': 'LOUISIANA', 'ME': 'MAINE', 'MD': 'MARYLAND',
+            'MA': 'MASSACHUSETTS', 'MI': 'MICHIGAN', 'MN': 'MINNESOTA', 'MS': 'MISSISSIPPI',
+            'MO': 'MISSOURI', 'MT': 'MONTANA', 'NE': 'NEBRASKA', 'NV': 'NEVADA',
+            'NH': 'NEW HAMPSHIRE', 'NJ': 'NEW JERSEY', 'NM': 'NEW MEXICO', 'NY': 'NEW YORK',
+            'NC': 'NORTH CAROLINA', 'ND': 'NORTH DAKOTA', 'OH': 'OHIO', 'OK': 'OKLAHOMA',
+            'OR': 'OREGON', 'PA': 'PENNSYLVANIA', 'RI': 'RHODE ISLAND', 'SC': 'SOUTH CAROLINA',
+            'SD': 'SOUTH DAKOTA', 'TN': 'TENNESSEE', 'TX': 'TEXAS', 'UT': 'UTAH',
+            'VT': 'VERMONT', 'VA': 'VIRGINIA', 'WA': 'WASHINGTON', 'WV': 'WEST VIRGINIA',
+            'WI': 'WISCONSIN', 'WY': 'WYOMING'
+        };
+        
+        // Check if query is a state code and region matches state name
+        if (stateMap[queryUpper] && regionUpper.includes(stateMap[queryUpper])) {
+            return true;
+        }
+        
+        // Check if query is a state name and region code matches
+        for (const [code, name] of Object.entries(stateMap)) {
+            if (name.includes(queryUpper) && regionUpper.includes(code)) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
 // Filter airports for autocomplete
 function filterAirports(query) {
-    if (!query || query.trim().length === 0) {
+    if (!query || query.trim().length === 0 || airportData.length === 0) {
         return [];
     }
     
     const searchQuery = query.trim().toUpperCase();
-    const matches = [];
     
+    // Check if query looks like a city search (has a space or is longer than 2 chars and no code match)
+    // Split query for city + state searches like "McAllen Texas"
+    const queryParts = searchQuery.split(/\s+/);
+    const cityQuery = queryParts[0]; // First part (city name)
+    const stateQuery = queryParts.length > 1 ? queryParts.slice(1).join(' ') : null; // Rest (state/region)
+    
+    const codeMatches = []; // Priority 1-5: Code matches
+    const nameMatches = []; // Priority 6: Name matches
+    const cityMatches = []; // Priority 7: City matches (prioritize when query looks like city)
+    
+    // Search through airports
     for (const airport of airportData) {
-        const codes = [
-            airport.iata_code,
-            airport.icao_code,
-            airport.ident,
-            airport.local_code,
-            airport.gps_code
-        ].filter(code => code && code !== '');
+        // Priority 1-5: Exact code prefix match (IATA first)
+        const codeOrder = [
+            { code: airport.iata_code, priority: 1 },
+            { code: airport.icao_code, priority: 2 },
+            { code: airport.ident, priority: 3 },
+            { code: airport.local_code, priority: 4 },
+            { code: airport.gps_code, priority: 5 }
+        ].filter(item => item.code && item.code !== '');
         
-        const code = codes.find(c => c.toUpperCase().startsWith(searchQuery));
+        // Check if any code starts with the query
+        const codeMatch = codeOrder.find(item => item.code.toUpperCase().startsWith(searchQuery));
         
-        if (code) {
-            matches.push({
+        if (codeMatch) {
+            codeMatches.push({
                 ...airport,
-                matchedCode: code
+                matchedCode: codeMatch.code,
+                priority: codeMatch.priority
+            });
+            
+            // If we have enough exact code matches, continue but don't skip city search
+            if (codeMatches.length >= 10) {
+                // Still search cities if query looks like a city name
+                if (queryParts.length > 1 || searchQuery.length > 2) {
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        // Always search cities and names, but prioritize based on query type
+        const city = airport.municipality ? airport.municipality.toUpperCase() : '';
+        const airportName = airport.name ? airport.name.toUpperCase() : '';
+        const isoRegion = airport.iso_region || '';
+        const region = isoRegion.split('-')[1] || ''; // Get state code (US-TX -> TX)
+        const country = getCountryName(airport.iso_country || '');
+        
+        // Check city match
+        let cityMatch = false;
+        if (city) {
+            // If query has multiple parts, match city name and optionally state
+            if (queryParts.length > 1) {
+                if (city.includes(cityQuery) && (stateQuery === null || 
+                    matchesState(stateQuery, region, country))) {
+                    cityMatch = true;
+                }
+            } else {
+                // Single word query - match if city starts with or contains it
+                if (city.startsWith(searchQuery) || city.includes(searchQuery)) {
+                    cityMatch = true;
+                }
+            }
+        }
+        
+        if (cityMatch && cityMatches.length < 8) {
+            cityMatches.push({
+                ...airport,
+                matchedCode: airport.iata_code || airport.ident || airport.local_code,
+                priority: 7
             });
         }
         
-        // Limit to 10 suggestions for performance
-        if (matches.length >= 10) {
-            break;
+        // Airport name match (if not too many city matches)
+        if (airportName.includes(searchQuery) && nameMatches.length < 5 && cityMatches.length < 5) {
+            nameMatches.push({
+                ...airport,
+                matchedCode: airport.iata_code || airport.ident || airport.local_code,
+                priority: 6
+            });
         }
     }
     
-    return matches;
+    // Sort code matches by priority and then alphabetically
+    codeMatches.sort((a, b) => {
+        if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+        }
+        return (a.matchedCode || '').localeCompare(b.matchedCode || '');
+    });
+    
+    // If query looks like a city search and we have city matches, prioritize them
+    const isCitySearch = queryParts.length > 1 || (searchQuery.length > 2 && codeMatches.length === 0);
+    
+    // Combine matches - if it's a city search, show city matches first
+    let allMatches;
+    if (isCitySearch && cityMatches.length > 0) {
+        allMatches = [...cityMatches, ...codeMatches, ...nameMatches];
+    } else {
+        allMatches = [...codeMatches, ...nameMatches, ...cityMatches];
+    }
+    
+    // Return top 10
+    return allMatches.slice(0, 10);
 }
 
 // Display autocomplete suggestions
 function displaySuggestions(suggestions) {
     const autocomplete = document.getElementById('autocomplete');
+    const searchInput = document.getElementById('searchInput');
     
-    if (suggestions.length === 0 || !document.getElementById('searchInput').value.trim()) {
+    if (!autocomplete || !searchInput) return;
+    
+    const query = searchInput.value.trim();
+    
+    if (suggestions.length === 0 || !query) {
         autocomplete.classList.remove('show');
         return;
     }
     
     autocomplete.innerHTML = suggestions.map((airport, index) => {
-        const code = airport.matchedCode;
+        const code = airport.matchedCode || airport.iata_code || airport.ident || 'N/A';
         const municipality = airport.municipality || '';
         const country = getCountryName(airport.iso_country || '');
         const location = municipality ? `${municipality}, ${country}` : country;
@@ -226,7 +357,9 @@ function displaySuggestions(suggestions) {
     autocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
         item.addEventListener('click', () => {
             const index = parseInt(item.dataset.index);
-            selectSuggestion(suggestions[index]);
+            if (suggestions[index]) {
+                selectSuggestion(suggestions[index]);
+            }
         });
     });
     
@@ -268,7 +401,17 @@ function handleSearch() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+    // Show loading message initially
+    document.getElementById('results').innerHTML = `
+        <div class="loading">Loading airport data...</div>
+    `;
+    
     await loadAirportData();
+    
+    // Clear loading message once data is loaded
+    if (airportData.length > 0) {
+        document.getElementById('results').innerHTML = '';
+    }
     
     const searchBtn = document.getElementById('searchBtn');
     const searchInput = document.getElementById('searchInput');
@@ -282,15 +425,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         clearTimeout(debounceTimer);
         
         debounceTimer = setTimeout(() => {
-            const query = e.target.value;
-            if (query.trim().length > 0) {
-                currentSuggestions = filterAirports(query);
-                displaySuggestions(currentSuggestions);
-            } else {
+            const query = e.target.value.trim();
+            
+            if (query.length === 0) {
                 autocomplete.classList.remove('show');
                 document.getElementById('results').innerHTML = '';
+                return;
             }
-        }, 150);
+            
+            if (airportData.length === 0) {
+                console.log('Airport data not loaded yet');
+                return;
+            }
+            
+            currentSuggestions = filterAirports(query);
+            console.log(`Found ${currentSuggestions.length} suggestions for "${query}"`);
+            displaySuggestions(currentSuggestions);
+        }, 100); // Reduced debounce time for more responsive feel
     });
     
     // Keyboard navigation
@@ -334,9 +485,4 @@ document.addEventListener('DOMContentLoaded', async () => {
             autocomplete.classList.remove('show');
         }
     });
-    
-    // Show loading message initially
-    document.getElementById('results').innerHTML = `
-        <div class="loading">Loading airport data...</div>
-    `;
 });
