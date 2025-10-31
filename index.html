@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airport Code Search</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>✈️ Airport Code Search</h1>
+            <p class="subtitle">Find any airport by its code</p>
+        </header>
+        
+        <div class="search-container">
+            <input 
+                type="text" 
+                id="searchInput" 
+                placeholder="Enter airport code (e.g., OAK, JFK, LAX)"
+                autocomplete="off"
+                autofocus
+            >
+            <button id="searchBtn">Search</button>
+        </div>
+        
+        <div id="results" class="results-container"></div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
